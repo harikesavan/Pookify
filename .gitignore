@@ -5,6 +5,7 @@ worker/.wrangler/
 .env
 rag-service/.env
 rag-service/venv/
+rag-service/.venv/
 rag-service/.data/
 __pycache__/
 .DS_Store
