@@ -66,20 +66,28 @@ export default {
 };
 
 async function handleChat(request: Request, env: Env): Promise<Response> {
+  const ragServiceUrl = env.RAG_SERVICE_URL || "http://localhost:8000";
   const body = await request.text();
+  const apiKey = request.headers.get("x-api-key") || "";
+  const sessionId = request.headers.get("x-session-id") || "";
+  const userId = request.headers.get("x-user-id") || "";
+  const companyId = request.headers.get("x-company-id") || "";
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetch(`${ragServiceUrl}/chat`, {
     method: "POST",
     headers: {
-      authorization: `Bearer ${env.OPENAI_API_KEY}`,
       "content-type": "application/json",
+      "x-api-key": apiKey,
+      "x-session-id": sessionId,
+      "x-user-id": userId,
+      "x-company-id": companyId,
     },
     body,
   });
 
   if (!response.ok) {
     const errorBody = await response.text();
-    console.error(`[/chat] OpenAI API error ${response.status}: ${errorBody}`);
+    console.error(`[/chat] RAG service error ${response.status}: ${errorBody}`);
     return new Response(errorBody, {
       status: response.status,
       headers: { "content-type": "application/json" },

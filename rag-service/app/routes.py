@@ -1,5 +1,9 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, Header
+import json
 
+from fastapi import APIRouter, File, UploadFile, HTTPException, Header, Request
+from fastapi.responses import StreamingResponse
+
+from app.chat import stream_chat_completion
 from app.companies import (
     create_company, get_company_by_id, get_company_by_api_key,
     update_company, regenerate_api_key, get_file_count,
@@ -15,6 +19,7 @@ from app.storage import load_companies, download_from_minio
 
 company_router = APIRouter(prefix="/companies", tags=["companies"])
 query_router = APIRouter(tags=["query"])
+chat_router = APIRouter(tags=["chat"])
 
 
 @company_router.post("")
@@ -69,7 +74,7 @@ async def handle_ingest_file(company_id: str, file: UploadFile = File(...)):
     file_content = await file.read()
     if not file_content:
         raise HTTPException(status_code=400, detail="Empty file")
-    return ingest_file_content(company["vector_store_id"], file.filename, file_content)
+    return ingest_file_content(company["vector_store_id"], file.filename, file_content, company_id=company_id)
 
 
 @company_router.post("/{company_id}/ingest-from-minio")
@@ -82,13 +87,19 @@ async def handle_ingest_from_minio(company_id: str, request: IngestFromMinioRequ
     if not file_content:
         raise HTTPException(status_code=400, detail="Downloaded file is empty")
     filename = request.object_key.split("/")[-1]
-    return ingest_file_content(company["vector_store_id"], filename, file_content)
+    return ingest_file_content(company["vector_store_id"], filename, file_content, company_id=company_id)
 
 
 @query_router.post("/query")
 async def handle_query(request: QueryRequest, x_api_key: str = Header(None)):
     company = get_company_by_api_key(x_api_key)
-    chunks = search_vector_store(company["vector_store_id"], request.query, request.max_results)
+    chunks = search_vector_store(
+        company["vector_store_id"],
+        request.query,
+        request.max_results,
+        session_id=request.session_id,
+        company_id=company["company_id"],
+    )
     return {
         "query": request.query,
         "company_id": company["company_id"],
@@ -100,4 +111,55 @@ async def handle_query(request: QueryRequest, x_api_key: str = Header(None)):
 @query_router.post("/ask")
 async def handle_ask(request: AskRequest, x_api_key: str = Header(None)):
     company = get_company_by_api_key(x_api_key)
-    return ask_with_file_search(company["vector_store_id"], request.query, request.max_results)
+    return ask_with_file_search(
+        company["vector_store_id"],
+        request.query,
+        request.max_results,
+        session_id=request.session_id,
+        company_id=company["company_id"],
+    )
+
+
+@chat_router.post("/chat")
+async def handle_chat(request: Request):
+    body = await request.json()
+
+    messages = body.get("messages", [])
+    model = body.get("model", "gpt-4o")
+    max_completion_tokens = body.get("max_completion_tokens", 1024)
+    is_streaming = body.get("stream", False)
+    session_id = body.get("session_id") or request.headers.get("x-session-id")
+    user_id = request.headers.get("x-user-id")
+    company_id = request.headers.get("x-company-id")
+
+    if not is_streaming:
+        from langfuse.openai import openai as lf_openai
+        from app.config import OPENAI_API_KEY
+        from langfuse import propagate_attributes
+
+        client = lf_openai.OpenAI(api_key=OPENAI_API_KEY)
+        with propagate_attributes(
+            session_id=session_id, user_id=user_id,
+            trace_name="chat-completion",
+            tags=["chat"], metadata={"company_id": company_id, "model": model},
+        ):
+            response = client.chat.completions.create(
+                model=model, messages=messages,
+                max_completion_tokens=max_completion_tokens,
+                name="vision-chat",
+            )
+            return response.model_dump()
+
+    def generate_sse():
+        for chunk in stream_chat_completion(
+            messages=messages,
+            model=model,
+            max_completion_tokens=max_completion_tokens,
+            session_id=session_id,
+            user_id=user_id,
+            company_id=company_id,
+        ):
+            yield f"data: {json.dumps(chunk.model_dump())}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generate_sse(), media_type="text/event-stream")

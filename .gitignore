@@ -4,6 +4,7 @@ worker/.wrangler/
 .dev.vars
 rag-service/.env
 rag-service/venv/
+rag-service/.data/
 __pycache__/
 .DS_Store
 *.xcuserstate

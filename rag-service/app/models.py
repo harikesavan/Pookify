@@ -19,8 +19,10 @@ class IngestFromMinioRequest(BaseModel):
 class QueryRequest(BaseModel):
     query: str
     max_results: int = 5
+    session_id: str = None
 
 
 class AskRequest(BaseModel):
     query: str
     max_results: int = 5
+    session_id: str = None
