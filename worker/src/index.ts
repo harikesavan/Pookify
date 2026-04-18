@@ -37,6 +37,10 @@ export default {
       if (url.pathname === "/transcribe-token") {
         return await handleTranscribeToken(env);
       }
+
+      if (url.pathname === "/transcribe") {
+        return await handleTranscribe(request, env);
+      }
     } catch (error) {
       console.error(`[${url.pathname}] Unhandled error:`, error);
       return new Response(
@@ -106,26 +110,51 @@ async function handleTranscribeToken(env: Env): Promise<Response> {
   });
 }
 
-async function handleTTS(request: Request, env: Env): Promise<Response> {
-  const body = await request.text();
-  const voiceId = env.ELEVENLABS_VOICE_ID;
+async function handleTranscribe(request: Request, env: Env): Promise<Response> {
+  const body = await request.arrayBuffer();
+  const contentType = request.headers.get("content-type") || "multipart/form-data";
 
-  const response = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-    {
-      method: "POST",
-      headers: {
-        "xi-api-key": env.ELEVENLABS_API_KEY,
-        "content-type": "application/json",
-        accept: "audio/mpeg",
-      },
-      body,
-    }
-  );
+  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      "content-type": contentType,
+    },
+    body,
+  });
 
   if (!response.ok) {
     const errorBody = await response.text();
-    console.error(`[/tts] ElevenLabs API error ${response.status}: ${errorBody}`);
+    console.error(`[/transcribe] OpenAI API error ${response.status}: ${errorBody}`);
+    return new Response(errorBody, {
+      status: response.status,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    headers: {
+      "content-type": response.headers.get("content-type") || "application/json",
+    },
+  });
+}
+
+async function handleTTS(request: Request, env: Env): Promise<Response> {
+  const body = await request.text();
+
+  const response = await fetch("https://api.openai.com/v1/audio/speech", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      "content-type": "application/json",
+    },
+    body,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.error(`[/tts] OpenAI TTS API error ${response.status}: ${errorBody}`);
     return new Response(errorBody, {
       status: response.status,
       headers: { "content-type": "application/json" },
