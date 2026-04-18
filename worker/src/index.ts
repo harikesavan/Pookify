@@ -1,17 +1,22 @@
 /**
  * Clicky Proxy Worker
  *
- * Proxies requests to OpenAI so the app never ships with raw API keys.
- * Keys are stored as Cloudflare secrets.
+ * Single gateway for the macOS app. The app never calls external APIs directly.
  *
  * Routes:
- *   POST /chat  → OpenAI Chat Completions API (streaming)
- *   POST /tts   → OpenAI Speech API
- *   POST /transcribe → OpenAI Audio Transcriptions API
+ *   POST /chat             → OpenAI Chat Completions API (streaming)
+ *   POST /tts              → OpenAI TTS API
+ *   POST /transcribe       → OpenAI Audio Transcription API
+ *   POST /transcribe-token → AssemblyAI temp token
+ *   POST /query-knowledge  → RAG Service (knowledge base query)
  */
 
 interface Env {
   OPENAI_API_KEY: string;
+  ELEVENLABS_API_KEY: string;
+  ELEVENLABS_VOICE_ID: string;
+  ASSEMBLYAI_API_KEY: string;
+  RAG_SERVICE_URL: string;
 }
 
 export default {
@@ -43,6 +48,10 @@ export default {
 
       if (url.pathname === "/transcribe") {
         return await handleTranscribe(request, env);
+      }
+
+      if (url.pathname === "/query-knowledge") {
+        return await handleQueryKnowledge(request, env);
       }
     } catch (error) {
       console.error(`[${url.pathname}] Unhandled error:`, error);
@@ -142,5 +151,26 @@ async function handleTTS(request: Request, env: Env): Promise<Response> {
     headers: {
       "content-type": response.headers.get("content-type") || "audio/mpeg",
     },
+  });
+}
+
+async function handleQueryKnowledge(request: Request, env: Env): Promise<Response> {
+  const ragServiceUrl = env.RAG_SERVICE_URL || "http://localhost:8000";
+  const body = await request.text();
+  const apiKey = request.headers.get("x-api-key") || "";
+
+  const response = await fetch(`${ragServiceUrl}/query`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+    },
+    body,
+  });
+
+  const responseBody = await response.text();
+  return new Response(responseBody, {
+    status: response.status,
+    headers: { "content-type": "application/json" },
   });
 }
