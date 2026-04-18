@@ -139,10 +139,10 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    /// Whether the user has completed onboarding at least once. Persisted
-    /// to UserDefaults so the Start button only appears on first launch.
+    /// Onboarding is disabled — always returns true so the app skips
+    /// the intro video and goes straight to the companion overlay.
     var hasCompletedOnboarding: Bool {
-        get { UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") }
+        get { return true }
         set { UserDefaults.standard.set(newValue, forKey: "hasCompletedOnboarding") }
     }
 
