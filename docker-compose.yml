@@ -30,6 +30,30 @@ services:
       - minio
     restart: unless-stopped
 
+  worker:
+    build: ./worker
+    ports:
+      - "8787:8787"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-unused}
+      ELEVENLABS_VOICE_ID: ${ELEVENLABS_VOICE_ID:-unused}
+      ASSEMBLYAI_API_KEY: ${ASSEMBLYAI_API_KEY:-unused}
+      RAG_SERVICE_URL: http://rag-service:8000
+    depends_on:
+      - rag-service
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "4000:3000"
+    environment:
+      RAG_SERVICE_URL: http://rag-service:8000
+    depends_on:
+      - rag-service
+    restart: unless-stopped
+
 volumes:
   minio-data:
   rag-data:

@@ -14,6 +14,7 @@ import { useFileUpload, type UploadedFile } from "@/hooks/use-file-upload";
 import {
   initialFormData,
   type PookieFormData,
+  type CreatePookieResult,
 } from "@/components/create-pookie/types";
 import { BuildProgress } from "@/components/create-pookie/BuildProgress";
 import { Success } from "@/components/create-pookie/Success";
@@ -33,6 +34,8 @@ export function CreatePookie() {
   const [phase, setPhase] = useState<Phase>("form");
   const [formData, setFormData] = useState<PookieFormData>(initialFormData);
   const [isDragging, setIsDragging] = useState(false);
+  const [result, setResult] = useState<CreatePookieResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const updateFormData = <K extends keyof PookieFormData>(
     field: K,
@@ -62,12 +65,48 @@ export function CreatePookie() {
   const isValid =
     formData.companyName.trim() !== "" && formData.docFiles.length > 0;
 
+  const handleSubmit = async () => {
+    setPhase("building");
+    setError(null);
+
+    try {
+      const body = new FormData();
+      body.append("companyName", formData.companyName);
+      body.append("description", formData.description);
+      for (const uploadedFile of formData.docFiles) {
+        body.append("files", uploadedFile.rawFile);
+      }
+
+      const response = await fetch("/api/create-pookie", {
+        method: "POST",
+        body,
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "Failed to create Pookie");
+      }
+
+      const data: CreatePookieResult = await response.json();
+      setResult(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+      setPhase("form");
+    }
+  };
+
   if (phase === "building") {
-    return <BuildProgress onComplete={() => setPhase("done")} />;
+    return (
+      <BuildProgress
+        onComplete={() => {
+          if (result) setPhase("done");
+        }}
+      />
+    );
   }
 
-  if (phase === "done") {
-    return <Success formData={formData} />;
+  if (phase === "done" && result) {
+    return <Success formData={formData} result={result} />;
   }
 
   return (
@@ -184,9 +223,12 @@ export function CreatePookie() {
               whileTap={{ scale: 0.99 }}
               className="pt-2"
             >
+              {error && (
+                <p className="text-red-500 text-sm text-center">{error}</p>
+              )}
               <Button
                 type="button"
-                onClick={() => setPhase("building")}
+                onClick={handleSubmit}
                 disabled={!isValid}
                 className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-red-500 text-sm text-white hover:bg-red-600"
               >

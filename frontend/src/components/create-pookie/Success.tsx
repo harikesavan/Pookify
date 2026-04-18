@@ -7,29 +7,21 @@ import { ArrowRight, Check, Copy, Download } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import type { PookieFormData } from "@/components/create-pookie/types";
+import type { PookieFormData, CreatePookieResult } from "@/components/create-pookie/types";
 
-const slugify = (raw: string) =>
-  raw
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 32) || "your-pookie";
-
-export function Success({ formData }: { formData: PookieFormData }) {
+export function Success({ formData, result }: { formData: PookieFormData; result: CreatePookieResult }) {
   const [copied, setCopied] = useState(false);
-  const slug = slugify(formData.companyName);
-  const shareLink = `pookify.app/c/${slug}`;
   const agentName = `Pookie from ${formData.companyName}`;
 
-  const copyShareLink = async () => {
+  const pookifySetupURL = `pookify://setup?key=${encodeURIComponent(result.api_key)}&company=${encodeURIComponent(result.company_name)}&id=${encodeURIComponent(result.company_id)}&url=${encodeURIComponent(result.config.rag_service_url)}`;
+
+  const copyApiKey = async () => {
     try {
-      await navigator.clipboard.writeText(`https://${shareLink}`);
+      await navigator.clipboard.writeText(result.api_key);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch {
-      /* noop — clipboard blocked */
+      /* noop */
     }
   };
 
@@ -71,17 +63,17 @@ export function Success({ formData }: { formData: PookieFormData }) {
               <Download className="h-5 w-5" />
             </div>
             <div className="flex-1">
-              <h2 className="text-lg font-semibold">Download Pookie</h2>
+              <h2 className="text-lg font-semibold">Open in Pookie</h2>
               <p className="text-muted-foreground text-sm">
-                macOS .dmg installer, ~22 MB
+                This will configure the Pookie app with your company&apos;s knowledge base.
               </p>
             </div>
             <Button
               asChild
               className="rounded-2xl bg-red-500 text-white hover:bg-red-600"
             >
-              <a href="#" download>
-                Download
+              <a href={pookifySetupURL}>
+                Launch Pookie
               </a>
             </Button>
           </div>
@@ -93,16 +85,16 @@ export function Success({ formData }: { formData: PookieFormData }) {
               <ArrowRight className="h-5 w-5" />
             </div>
             <div className="flex-1">
-              <h2 className="text-lg font-semibold">Share with customers</h2>
+              <h2 className="text-lg font-semibold">Your API key</h2>
               <p className="text-muted-foreground text-sm">
-                Anyone with this link can install your Pookie.
+                Use this to connect other integrations.
               </p>
               <div className="mt-3 flex items-center gap-2 rounded-xl border bg-muted/30 p-3">
-                <code className="flex-1 truncate text-sm">{shareLink}</code>
+                <code className="flex-1 truncate text-sm">{result.api_key}</code>
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={copyShareLink}
+                  onClick={copyApiKey}
                   className="inline-flex items-center gap-2 rounded-xl leading-none"
                 >
                   {copied ? (
@@ -118,6 +110,9 @@ export function Success({ formData }: { formData: PookieFormData }) {
                   )}
                 </Button>
               </div>
+              <p className="text-muted-foreground mt-2 text-xs">
+                {result.ingested_files.length} document{result.ingested_files.length !== 1 ? "s" : ""} indexed
+              </p>
             </div>
           </div>
         </Card>

@@ -7,6 +7,7 @@ export interface UploadedFile {
   size: number;
   type: string;
   url: string;
+  rawFile: File;
 }
 
 interface UseFileUploadProps {
@@ -35,6 +36,7 @@ export function useFileUpload({ onUpload }: UseFileUploadProps = {}) {
           size: file.size,
           type: file.type,
           url,
+          rawFile: file,
         };
       });
 

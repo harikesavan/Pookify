@@ -82,6 +82,23 @@ final class CompanionManager: ObservableObject {
         return OpenAITTSClient(proxyURL: "\(Self.workerBaseURL)/tts")
     }()
 
+    private lazy var knowledgeBaseClient: KnowledgeBaseClient = {
+        let client = KnowledgeBaseClient(baseURL: Self.workerBaseURL)
+        if let apiKey = CompanyConfigManager.loadConfig()?.api_key {
+            client.configure(apiKey: apiKey)
+        }
+        return client
+    }()
+
+    @Published var companyName: String?
+
+    func reloadCompanyConfig() {
+        guard let config = CompanyConfigManager.loadConfig() else { return }
+        companyName = config.company_name
+        knowledgeBaseClient.configure(apiKey: config.api_key)
+        print("📋 Company config reloaded: \(config.company_name)")
+    }
+
     /// Conversation history so the AI remembers prior exchanges within a session.
     /// Each entry is the user's transcript and the assistant's response.
     private var conversationHistory: [(userTranscript: String, assistantResponse: String)] = []
@@ -183,8 +200,8 @@ final class CompanionManager: ObservableObject {
         bindVoiceStateObservation()
         bindAudioPowerLevel()
         bindShortcutTransitions()
-        // Eagerly touch the OpenAI API so its TLS warmup handshake completes
         bindTextPromptShortcut()
+        reloadCompanyConfig()
         // Eagerly touch the OpenAI API so its TLS warmup handshake completes
         // well before the onboarding demo fires at ~40s into the video.
         _ = openAIAPI
@@ -673,11 +690,23 @@ final class CompanionManager: ObservableObject {
                     (userPlaceholder: entry.userTranscript, assistantResponse: entry.assistantResponse)
                 }
 
+                let knowledgeResponse = await knowledgeBaseClient.queryRelevantChunks(for: transcript)
+                let retrievedContext = knowledgeBaseClient.formatChunksForPrompt(knowledgeResponse?.chunks ?? [])
+
+                var enrichedUserPrompt = ""
+                if let retrievedContext {
+                    enrichedUserPrompt += retrievedContext + "\n\n"
+                }
+                if let customInstructions = knowledgeResponse?.custom_instructions, !customInstructions.isEmpty {
+                    enrichedUserPrompt += "<company_instructions>\n\(customInstructions)\n</company_instructions>\n\n"
+                }
+                enrichedUserPrompt += transcript
+
                 let (fullResponseText, _) = try await openAIAPI.analyzeImageStreaming(
                     images: labeledImages,
                     systemPrompt: Self.companionVoiceResponseSystemPrompt,
                     conversationHistory: historyForAPI,
-                    userPrompt: transcript,
+                    userPrompt: enrichedUserPrompt,
                     onTextChunk: { _ in
                         // No streaming text display — spinner stays until TTS plays
                     }

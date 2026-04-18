@@ -53,6 +53,34 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         // startSparkleUpdater()
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme == "pookify" {
+            guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                  let queryItems = components.queryItems else { continue }
+
+            let params = Dictionary(uniqueKeysWithValues: queryItems.compactMap { item in
+                item.value.map { (item.name, $0) }
+            })
+
+            guard let apiKey = params["key"],
+                  let companyName = params["company"] else {
+                print("⚠️ Clicky: Missing key or company in pookify:// URL")
+                continue
+            }
+
+            let config = CompanyConfig(
+                company_id: params["id"] ?? companyName.lowercased().replacingOccurrences(of: " ", with: "-"),
+                company_name: companyName,
+                rag_service_url: params["url"] ?? "http://localhost:8000",
+                api_key: apiKey
+            )
+
+            CompanyConfigManager.saveConfig(config)
+            companionManager.reloadCompanyConfig()
+            print("📋 Clicky: Configured for \(config.company_name) via URL scheme")
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         companionManager.stop()
     }
