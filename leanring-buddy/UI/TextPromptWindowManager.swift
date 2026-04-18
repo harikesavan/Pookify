@@ -146,11 +146,11 @@ private struct TextPromptPanelView: View {
                 .foregroundColor(DS.Colors.accentText)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Ask Clicky")
+                Text("Ask Pookify")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(DS.Colors.textPrimary)
 
-                Text("Type a message. Clicky will still look at your screen.")
+                Text("Type a message. Pookify will still look at your screen.")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(DS.Colors.textTertiary)
             }
