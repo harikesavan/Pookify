@@ -12,6 +12,7 @@ import SwiftUI
 
 struct CompanionPanelView: View {
     @ObservedObject var companionManager: CompanionManager
+    var usageTracker: UsageTracker?
     @State private var emailInput: String = ""
 
     var body: some View {
@@ -66,6 +67,15 @@ struct CompanionPanelView: View {
                     .padding(.horizontal, 16)
             }
 
+            if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted,
+               let usageTracker {
+                Spacer()
+                    .frame(height: 12)
+
+                usageSection(tracker: usageTracker)
+                    .padding(.horizontal, 16)
+            }
+
             if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
                 Spacer()
                     .frame(height: 12)
@@ -100,8 +110,8 @@ struct CompanionPanelView: View {
                     .frame(width: 8, height: 8)
                     .shadow(color: statusDotColor.opacity(0.6), radius: 4)
 
-                Text("Clicky")
-                    .font(.system(size: 14, weight: .semibold))
+                Text("Pookify")
+                    .font(DS.Typography.headingMedium)
                     .foregroundColor(DS.Colors.textPrimary)
             }
 
@@ -156,7 +166,7 @@ struct CompanionPanelView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else if companionManager.allPermissionsGranted {
-            Text("You're all set. Hit Start to meet Clicky.")
+            Text("You're all set. Hit Start to meet Pookify.")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(DS.Colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -167,7 +177,7 @@ struct CompanionPanelView: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(DS.Colors.textSecondary)
 
-                Text("Some permissions were revoked. Grant all four below to keep using Clicky.")
+                Text("Some permissions were revoked. Grant all four below to keep using Pookify.")
                     .font(.system(size: 11))
                     .foregroundColor(DS.Colors.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -175,7 +185,7 @@ struct CompanionPanelView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Hi, I'm Farza. This is Clicky.")
+                Text("Hi, I'm Farza. This is Pookify.")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(DS.Colors.textSecondary)
 
@@ -184,7 +194,7 @@ struct CompanionPanelView: View {
                     .foregroundColor(DS.Colors.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Nothing runs in the background. Clicky will only take a screenshot when you press the hot key. So, you can give that permission in peace. If you are still sus, eh, I can't do much there champ.")
+                Text("Nothing runs in the background. Pookify will only take a screenshot when you press the hot key. So, you can give that permission in peace. If you are still sus, eh, I can't do much there champ.")
                     .font(.system(size: 11))
                     .foregroundColor(Color(red: 0.9, green: 0.4, blue: 0.4))
                     .fixedSize(horizontal: false, vertical: true)
@@ -259,7 +269,7 @@ struct CompanionPanelView: View {
     private var settingsSection: some View {
         VStack(spacing: 2) {
             Text("PERMISSIONS")
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .font(DS.Typography.overline)
                 .foregroundColor(DS.Colors.textTertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, 6)
@@ -569,7 +579,7 @@ struct CompanionPanelView: View {
                     .foregroundColor(DS.Colors.textTertiary)
                     .frame(width: 16)
 
-                Text("Show Clicky")
+                Text("Show Pookify")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(DS.Colors.textSecondary)
             }
@@ -691,6 +701,105 @@ struct CompanionPanelView: View {
         .pointerCursor()
     }
 
+    // MARK: - Usage Section
+
+    private func usageSection(tracker: UsageTracker) -> some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text("USAGE")
+                    .font(DS.Typography.overline)
+                    .foregroundColor(DS.Colors.textTertiary)
+                Spacer()
+                Text("Resets daily")
+                    .font(DS.Typography.overline)
+                    .foregroundColor(DS.Colors.textTertiary)
+            }
+
+            usageBar(
+                label: "Messages",
+                used: tracker.totalMessagesUsed,
+                limit: tracker.messageLimit,
+                percent: tracker.messageUsagePercent
+            )
+
+            usageBar(
+                label: "Tokens",
+                used: tracker.totalTokensUsed,
+                limit: tracker.tokenLimit,
+                percent: tracker.tokenUsagePercent,
+                formatUsed: tracker.formattedTokensUsed,
+                formatLimit: tracker.formattedTokenLimit
+            )
+
+            if tracker.hasReachedAnyLimit {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(DS.Colors.warning)
+                    Text("Daily limit reached. Resets at midnight.")
+                        .font(DS.Typography.caption)
+                        .foregroundColor(DS.Colors.warningText)
+                    Spacer()
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                .fill(DS.Colors.surface1)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+        )
+    }
+
+    private func usageBar(
+        label: String,
+        used: Int,
+        limit: Int,
+        percent: Double,
+        formatUsed: String? = nil,
+        formatLimit: String? = nil
+    ) -> some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text(label)
+                    .font(DS.Typography.caption)
+                    .foregroundColor(DS.Colors.textSecondary)
+                Spacer()
+                Text("\(formatUsed ?? "\(used)") / \(formatLimit ?? "\(limit)")")
+                    .font(DS.Typography.mono)
+                    .foregroundColor(percent >= 0.9 ? DS.Colors.warningText : DS.Colors.textTertiary)
+            }
+
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(DS.Colors.surface3)
+                        .frame(height: 6)
+
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(barColor(for: percent))
+                        .frame(width: geometry.size.width * min(1.0, percent), height: 6)
+                        .animation(.easeOut(duration: 0.4), value: percent)
+                }
+            }
+            .frame(height: 6)
+        }
+    }
+
+    private func barColor(for percent: Double) -> Color {
+        if percent >= 0.9 {
+            return DS.Colors.destructive
+        } else if percent >= 0.7 {
+            return DS.Colors.warning
+        } else {
+            return DS.Colors.accent
+        }
+    }
+
     // MARK: - DM Farza Button
 
     private var dmFarzaButton: some View {
@@ -731,37 +840,39 @@ struct CompanionPanelView: View {
     // MARK: - Footer
 
     private var footerSection: some View {
-        HStack {
-            Button(action: {
-                NSApp.terminate(nil)
-            }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "power")
-                        .font(.system(size: 11, weight: .medium))
-                    Text("Quit Clicky")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .foregroundColor(DS.Colors.textTertiary)
-            }
-            .buttonStyle(.plain)
-            .pointerCursor()
-
-            if companionManager.hasCompletedOnboarding {
-                Spacer()
-
+        VStack(spacing: 8) {
+            HStack {
                 Button(action: {
-                    companionManager.replayOnboarding()
+                    NSApp.terminate(nil)
                 }) {
                     HStack(spacing: 6) {
-                        Image(systemName: "play.circle")
+                        Image(systemName: "power")
                             .font(.system(size: 11, weight: .medium))
-                        Text("Watch Onboarding Again")
-                            .font(.system(size: 12, weight: .medium))
+                        Text("Quit Pookify")
+                            .font(DS.Typography.bodySmall)
                     }
                     .foregroundColor(DS.Colors.textTertiary)
                 }
                 .buttonStyle(.plain)
                 .pointerCursor()
+
+                if companionManager.hasCompletedOnboarding {
+                    Spacer()
+
+                    Button(action: {
+                        companionManager.replayOnboarding()
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "play.circle")
+                                .font(.system(size: 11, weight: .medium))
+                            Text("Watch Onboarding Again")
+                                .font(DS.Typography.bodySmall)
+                        }
+                        .foregroundColor(DS.Colors.textTertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .pointerCursor()
+                }
             }
         }
     }

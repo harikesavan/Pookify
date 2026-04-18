@@ -12,19 +12,30 @@ from app.config import PUBLIC_RAG_URL
 from app.ingestion import ingest_file_content
 from app.models import (
     CreateCompanyRequest, UpdateCompanyRequest,
-    IngestFromMinioRequest, QueryRequest, AskRequest,
+    IngestFromMinioRequest, QueryRequest, AskRequest, ExchangeTokenRequest,
 )
 from app.search import search_vector_store, ask_with_file_search
+from app.setup_tokens import create_setup_token, exchange_setup_token
 from app.storage import load_companies, download_from_minio
 
 company_router = APIRouter(prefix="/companies", tags=["companies"])
 query_router = APIRouter(tags=["query"])
 chat_router = APIRouter(tags=["chat"])
+auth_router = APIRouter(tags=["auth"])
 
 
 @company_router.post("")
 async def handle_create_company(request: CreateCompanyRequest):
-    return create_company(request.company_id, request.company_name, request.custom_instructions)
+    company = create_company(request.company_id, request.company_name, request.custom_instructions)
+    setup_token = create_setup_token(request.company_id)
+    return {**company, "setup_token": setup_token}
+
+
+@company_router.post("/{company_id}/setup-token")
+async def handle_create_setup_token(company_id: str):
+    get_company_by_id(company_id)
+    token = create_setup_token(company_id)
+    return {"setup_token": token, "expires_in_seconds": 900}
 
 
 @company_router.get("")
@@ -163,3 +174,15 @@ async def handle_chat(request: Request):
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(generate_sse(), media_type="text/event-stream")
+
+
+@auth_router.post("/exchange-token")
+async def handle_exchange_token(request: ExchangeTokenRequest):
+    company_id = exchange_setup_token(request.token)
+    company = get_company_by_id(company_id)
+    return {
+        "company_id": company["company_id"],
+        "company_name": company["company_name"],
+        "api_key": company["api_key"],
+        "rag_service_url": PUBLIC_RAG_URL,
+    }

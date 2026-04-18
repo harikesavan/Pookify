@@ -32,11 +32,13 @@ final class MenuBarPanelManager: NSObject {
     private var dismissPanelObserver: NSObjectProtocol?
 
     private let companionManager: CompanionManager
+    private let usageTracker: UsageTracker?
     private let panelWidth: CGFloat = 320
     private let panelHeight: CGFloat = 380
 
-    init(companionManager: CompanionManager) {
+    init(companionManager: CompanionManager, usageTracker: UsageTracker? = nil) {
         self.companionManager = companionManager
+        self.usageTracker = usageTracker
         super.init()
         createStatusItem()
 
@@ -144,8 +146,11 @@ final class MenuBarPanelManager: NSObject {
     }
 
     private func createPanel() {
-        let companionPanelView = CompanionPanelView(companionManager: companionManager)
-            .frame(width: panelWidth)
+        let companionPanelView = CompanionPanelView(
+            companionManager: companionManager,
+            usageTracker: usageTracker
+        )
+        .frame(width: panelWidth)
 
         let hostingView = NSHostingView(rootView: companionPanelView)
         hostingView.frame = NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight)

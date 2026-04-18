@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { File, Sparkles, Upload, X } from "lucide-react";
 
@@ -31,6 +32,7 @@ const formatFileSize = (bytes: number) => {
 };
 
 export function CreatePookie() {
+  const router = useRouter();
   const [phase, setPhase] = useState<Phase>("form");
   const [formData, setFormData] = useState<PookieFormData>(initialFormData);
   const [isDragging, setIsDragging] = useState(false);
@@ -89,6 +91,10 @@ export function CreatePookie() {
 
       const data: CreatePookieResult = await response.json();
       setResult(data);
+
+      localStorage.setItem("pookify_api_key", data.api_key);
+      localStorage.setItem("pookify_company_name", data.company_name);
+      localStorage.setItem("pookify_authenticated", "true");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
       setPhase("form");
@@ -99,14 +105,12 @@ export function CreatePookie() {
     return (
       <BuildProgress
         onComplete={() => {
-          if (result) setPhase("done");
+          if (result) {
+            router.push("/dashboard");
+          }
         }}
       />
     );
-  }
-
-  if (phase === "done" && result) {
-    return <Success formData={formData} result={result} />;
   }
 
   return (

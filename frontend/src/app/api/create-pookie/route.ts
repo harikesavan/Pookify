@@ -72,6 +72,7 @@ export async function POST(request: NextRequest) {
     company_id: companyId,
     company_name: companyName,
     api_key: company.api_key,
+    setup_token: company.setup_token,
     vector_store_id: company.vector_store_id,
     ingested_files: ingestResults,
     config,

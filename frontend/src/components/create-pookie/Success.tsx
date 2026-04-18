@@ -13,11 +13,11 @@ export function Success({ formData, result }: { formData: PookieFormData; result
   const [copied, setCopied] = useState(false);
   const agentName = `Pookie from ${formData.companyName}`;
 
-  const pookifySetupURL = `pookify://setup?key=${encodeURIComponent(result.api_key)}&company=${encodeURIComponent(result.company_name)}&id=${encodeURIComponent(result.company_id)}&url=${encodeURIComponent(result.config.rag_service_url)}`;
+  const pookifySetupURL = `pookify://setup?token=${encodeURIComponent(result.setup_token)}`;
 
-  const copyApiKey = async () => {
+  const copySetupLink = async () => {
     try {
-      await navigator.clipboard.writeText(result.api_key);
+      await navigator.clipboard.writeText(pookifySetupURL);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch {
@@ -85,16 +85,16 @@ export function Success({ formData, result }: { formData: PookieFormData; result
               <ArrowRight className="h-5 w-5" />
             </div>
             <div className="flex-1">
-              <h2 className="text-lg font-semibold">Your API key</h2>
+              <h2 className="text-lg font-semibold">Share setup link</h2>
               <p className="text-muted-foreground text-sm">
-                Use this to connect other integrations.
+                Send this to your team. The link expires in 15 minutes and can only be used once.
               </p>
               <div className="mt-3 flex items-center gap-2 rounded-xl border bg-muted/30 p-3">
-                <code className="flex-1 truncate text-sm">{result.api_key}</code>
+                <code className="flex-1 truncate text-sm">pookify://setup?token=...</code>
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={copyApiKey}
+                  onClick={copySetupLink}
                   className="inline-flex items-center gap-2 rounded-xl leading-none"
                 >
                   {copied ? (

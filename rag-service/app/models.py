@@ -26,3 +26,7 @@ class AskRequest(BaseModel):
     query: str
     max_results: int = 5
     session_id: str = None
+
+
+class ExchangeTokenRequest(BaseModel):
+    token: str

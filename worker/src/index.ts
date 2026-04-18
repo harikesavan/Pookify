@@ -53,6 +53,10 @@ export default {
       if (url.pathname === "/query-knowledge") {
         return await handleQueryKnowledge(request, env);
       }
+
+      if (url.pathname === "/exchange-token") {
+        return await handleExchangeToken(request, env);
+      }
     } catch (error) {
       console.error(`[${url.pathname}] Unhandled error:`, error);
       return new Response(
@@ -173,6 +177,23 @@ async function handleQueryKnowledge(request: Request, env: Env): Promise<Respons
       "content-type": "application/json",
       "x-api-key": apiKey,
     },
+    body,
+  });
+
+  const responseBody = await response.text();
+  return new Response(responseBody, {
+    status: response.status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+async function handleExchangeToken(request: Request, env: Env): Promise<Response> {
+  const ragServiceUrl = env.RAG_SERVICE_URL || "http://localhost:8000";
+  const body = await request.text();
+
+  const response = await fetch(`${ragServiceUrl}/exchange-token`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
     body,
   });
 

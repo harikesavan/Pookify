@@ -25,12 +25,11 @@ struct leanring_buddyApp: App {
     }
 }
 
-/// Manages the companion lifecycle: creates the menu bar panel and starts
-/// the companion voice pipeline on launch.
 @MainActor
 final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarPanelManager: MenuBarPanelManager?
     private let companionManager = CompanionManager()
+    private let usageTracker = UsageTracker()
     private var sparkleUpdaterController: SPUStandardUpdaterController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -42,10 +41,13 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         ClickyAnalytics.configure()
         ClickyAnalytics.trackAppOpened()
 
-        menuBarPanelManager = MenuBarPanelManager(companionManager: companionManager)
+        companionManager.usageTracker = usageTracker
+
+        menuBarPanelManager = MenuBarPanelManager(
+            companionManager: companionManager,
+            usageTracker: usageTracker
+        )
         companionManager.start()
-        // Auto-open the panel if the user still needs to do something:
-        // either they haven't onboarded yet, or permissions were revoked.
         if !companionManager.hasCompletedOnboarding || !companionManager.allPermissionsGranted {
             menuBarPanelManager?.showPanelOnLaunch()
         }
@@ -62,22 +64,44 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
                 item.value.map { (item.name, $0) }
             })
 
-            guard let apiKey = params["key"],
-                  let companyName = params["company"] else {
-                print("⚠️ Clicky: Missing key or company in pookify:// URL")
+            guard let setupToken = params["token"] else {
+                print("⚠️ Pookify: Missing token in pookify:// URL")
                 continue
             }
 
-            let config = CompanyConfig(
-                company_id: params["id"] ?? companyName.lowercased().replacingOccurrences(of: " ", with: "-"),
-                company_name: companyName,
-                rag_service_url: params["url"] ?? "http://localhost:8000",
-                api_key: apiKey
-            )
+            Task {
+                await exchangeSetupToken(setupToken)
+            }
+        }
+    }
 
-            CompanyConfigManager.saveConfig(config)
-            companionManager.reloadCompanyConfig()
-            print("📋 Clicky: Configured for \(config.company_name) via URL scheme")
+    private func exchangeSetupToken(_ token: String) async {
+        let workerBaseURL = "http://localhost:8787"
+        let url = URL(string: "\(workerBaseURL)/exchange-token")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["token": token])
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+                let body = String(data: data, encoding: .utf8) ?? ""
+                print("⚠️ Pookify: Token exchange failed (\(statusCode)): \(body)")
+                return
+            }
+
+            let config = try JSONDecoder().decode(CompanyConfig.self, from: data)
+            await MainActor.run {
+                CompanyConfigManager.saveConfig(config)
+                companionManager.reloadCompanyConfig()
+                print("📋 Pookify: Configured for \(config.company_name) via setup token")
+            }
+        } catch {
+            print("⚠️ Pookify: Token exchange error: \(error.localizedDescription)")
         }
     }
 
@@ -85,9 +109,6 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         companionManager.stop()
     }
 
-    /// Registers the app as a login item so it launches automatically on
-    /// startup. Uses SMAppService which shows the app in System Settings >
-    /// General > Login Items, letting the user toggle it off if they want.
     private func registerAsLoginItemIfNeeded() {
         let loginItemService = SMAppService.mainApp
         if loginItemService.status != .enabled {

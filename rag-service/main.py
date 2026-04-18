@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import DATA_DIR, MINIO_BUCKET
-from app.routes import company_router, query_router, chat_router
+from app.routes import company_router, query_router, chat_router, auth_router
 from app.storage import load_companies, ensure_minio_bucket, get_minio_client
 
 
@@ -36,6 +36,7 @@ app.add_middleware(
 app.include_router(company_router)
 app.include_router(query_router)
 app.include_router(chat_router)
+app.include_router(auth_router)
 
 
 @app.get("/health")

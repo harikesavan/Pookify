@@ -183,6 +183,45 @@ enum DS {
         }
     }
 
+    // MARK: - Typography
+    //
+    // Premium type hierarchy using SF Pro Rounded for headings (friendly,
+    // approachable personality) and SF Pro Text for body/UI (crisp readability).
+    // SF Pro ships with macOS so no font embedding is needed.
+
+    enum Typography {
+
+        // ── Display / Hero ─────────────────────────────────────────────
+        /// Big, bold headlines — login hero, onboarding titles.
+        static let displayLarge = Font.system(size: 32, weight: .bold, design: .rounded)
+        /// Section hero text — feature callouts, credit balance number.
+        static let displayMedium = Font.system(size: 26, weight: .bold, design: .rounded)
+
+        // ── Headings ───────────────────────────────────────────────────
+        /// Primary heading — panel titles, card headings.
+        static let headingLarge = Font.system(size: 20, weight: .semibold, design: .rounded)
+        /// Secondary heading — section labels, dialog titles.
+        static let headingMedium = Font.system(size: 16, weight: .semibold, design: .rounded)
+        /// Tertiary heading — group labels, small section headers.
+        static let headingSmall = Font.system(size: 13, weight: .semibold, design: .rounded)
+
+        // ── Body ───────────────────────────────────────────────────────
+        /// Standard body text — descriptions, explanations.
+        static let bodyLarge = Font.system(size: 14, weight: .regular, design: .default)
+        /// Default UI text — buttons, form labels, list items.
+        static let bodyMedium = Font.system(size: 13, weight: .medium, design: .default)
+        /// Secondary body — hints, helper text, timestamps.
+        static let bodySmall = Font.system(size: 12, weight: .regular, design: .default)
+
+        // ── Captions / Labels ──────────────────────────────────────────
+        /// Tiny labels — keyboard shortcuts, permission status, badges.
+        static let caption = Font.system(size: 11, weight: .medium, design: .default)
+        /// All-caps section labels — "PERMISSIONS", "USAGE".
+        static let overline = Font.system(size: 10, weight: .semibold, design: .rounded)
+        /// Monospaced for code, API keys, token counts.
+        static let mono = Font.system(size: 12, weight: .medium, design: .monospaced)
+    }
+
     // MARK: - Spacing (for reference, not enforced)
 
     enum Spacing {

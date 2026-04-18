@@ -17,6 +17,7 @@ export interface CreatePookieResult {
   company_id: string;
   company_name: string;
   api_key: string;
+  setup_token: string;
   vector_store_id: string;
   ingested_files: { filename: string; status: string }[];
   config: PookieConfig;
