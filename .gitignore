@@ -1,8 +1,14 @@
 worker/node_modules/
 worker/.dev.vars
+worker/.wrangler/
+.dev.vars
 .DS_Store
 *.xcuserstate
+*.xcuserdatad
+xcuserdata/
 build/
 releases/
 .claude/
+.sisyphus/
+.idea/
 coding-plans/
