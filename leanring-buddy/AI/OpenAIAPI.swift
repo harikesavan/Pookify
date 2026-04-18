@@ -15,7 +15,7 @@ class OpenAIAPI {
     var model: String
     private let session: URLSession
 
-    init(proxyURL: String, model: String = "gpt-4o") {
+    init(proxyURL: String, model: String = "gpt-5.4") {
         self.apiURL = URL(string: proxyURL)!
         self.model = model
 
@@ -178,7 +178,8 @@ class OpenAIAPI {
         images: [(data: Data, label: String)],
         systemPrompt: String,
         conversationHistory: [(userPlaceholder: String, assistantResponse: String)] = [],
-        userPrompt: String
+        userPrompt: String,
+        maxCompletionTokens: Int = 1024
     ) async throws -> (text: String, duration: TimeInterval) {
         let startTime = Date()
 
@@ -214,7 +215,7 @@ class OpenAIAPI {
 
         let body: [String: Any] = [
             "model": model,
-            "max_completion_tokens": 256,
+            "max_completion_tokens": maxCompletionTokens,
             "messages": messages
         ]
 

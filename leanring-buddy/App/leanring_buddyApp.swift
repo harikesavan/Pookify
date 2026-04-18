@@ -96,8 +96,7 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
 
             let config = try JSONDecoder().decode(CompanyConfig.self, from: data)
             await MainActor.run {
-                CompanyConfigManager.saveConfig(config)
-                companionManager.reloadCompanyConfig()
+                companionManager.applyCompanyConfig(config)
                 print("📋 Pookify: Configured for \(config.company_name) via setup token")
             }
         } catch {

@@ -1,0 +1,1 @@
+Clicky (leanring-buddy) is a macOS menu bar companion app built with SwiftUI/AppKit. It uses push-to-talk and typed prompts, screenshots the screen, sends them through a Cloudflare Worker proxy to OpenAI, speaks responses via TTS, and can point a cursor overlay at on-screen elements. Key areas are App/, UI/, Voice/, AI/, and Utilities/.

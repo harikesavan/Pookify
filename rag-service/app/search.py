@@ -64,7 +64,7 @@ def ask_with_file_search(
         trace_name="rag-ask",
     ):
         response = openai_client.responses.create(
-            model="gpt-4o",
+            model="gpt-5.4",
             input=query,
             tools=[{
                 "type": "file_search",

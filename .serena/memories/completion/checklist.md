@@ -1,0 +1,1 @@
+When finishing work in this repo: keep changes minimal, do not rename the legacy leanring typo, avoid fixing known non-blocking warnings, and verify with diagnostics/build only when applicable. For the worker, use wrangler commands; for the macOS app, build from Xcode instead of terminal xcodebuild.

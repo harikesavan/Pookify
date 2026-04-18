@@ -9,7 +9,7 @@ langfuse = get_client()
 
 def stream_chat_completion(
     messages: list,
-    model: str = "gpt-4o",
+    model: str = "gpt-5.4",
     max_completion_tokens: int = 1024,
     session_id: str = None,
     user_id: str = None,

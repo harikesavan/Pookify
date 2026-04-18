@@ -67,6 +67,23 @@ struct CompanionPanelView: View {
                     .padding(.horizontal, 16)
             }
 
+            if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
+                Spacer()
+                    .frame(height: 12)
+
+                guidedWorkflowButton
+                    .padding(.horizontal, 16)
+            }
+
+            if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted,
+               let workflowSession = companionManager.workflowSession {
+                Spacer()
+                    .frame(height: 12)
+
+                workflowSection(workflowSession)
+                    .padding(.horizontal, 16)
+            }
+
             if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted,
                let usageTracker {
                 Spacer()
@@ -110,9 +127,17 @@ struct CompanionPanelView: View {
                     .frame(width: 8, height: 8)
                     .shadow(color: statusDotColor.opacity(0.6), radius: 4)
 
-                Text("Pookify")
-                    .font(DS.Typography.headingMedium)
-                    .foregroundColor(DS.Colors.textPrimary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Pookify")
+                        .font(DS.Typography.headingMedium)
+                        .foregroundColor(DS.Colors.textPrimary)
+
+                    if let companyName = companionManager.companyName, !companyName.isEmpty {
+                        Text(companyName)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(DS.Colors.textTertiary)
+                    }
+                }
             }
 
             Spacer()
@@ -144,7 +169,29 @@ struct CompanionPanelView: View {
 
     @ViewBuilder
     private var permissionsCopySection: some View {
-        if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
+        if let configurationNoticeText = companionManager.configurationNoticeText {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.success)
+
+                Text(configurationNoticeText)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                    .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+            )
+        } else if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Hold Control+Option to talk.")
                     .font(.system(size: 12, weight: .medium))
@@ -631,8 +678,8 @@ struct CompanionPanelView: View {
             Spacer()
 
             HStack(spacing: 0) {
-                modelOptionButton(label: "GPT-4o", modelID: "gpt-4o")
-                modelOptionButton(label: "GPT-4o mini", modelID: "gpt-4o-mini")
+                modelOptionButton(label: "GPT-5.4", modelID: "gpt-5.4")
+                modelOptionButton(label: "GPT-5.4 mini", modelID: "gpt-5.4-mini")
             }
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -695,6 +742,178 @@ struct CompanionPanelView: View {
             .overlay(
                 RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
                     .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+    }
+
+    @State private var workflowObjectiveText = ""
+
+    private var guidedWorkflowButton: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "list.bullet.clipboard")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+
+                Text("Guided workflow")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(DS.Colors.textSecondary)
+
+                Spacer()
+            }
+
+            TextField("What do you need help with?", text: $workflowObjectiveText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundColor(DS.Colors.textPrimary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.white.opacity(0.04))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+                )
+                .onSubmit {
+                    let trimmed = workflowObjectiveText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmed.isEmpty {
+                        companionManager.startGuidedWorkflowFromScreenContext()
+                    } else {
+                        companionManager.startGuidedWorkflow(withObjective: trimmed)
+                    }
+                    workflowObjectiveText = ""
+                }
+
+            HStack(spacing: 8) {
+                Button(action: {
+                    let trimmed = workflowObjectiveText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmed.isEmpty {
+                        companionManager.startGuidedWorkflowFromScreenContext()
+                    } else {
+                        companionManager.startGuidedWorkflow(withObjective: trimmed)
+                    }
+                    workflowObjectiveText = ""
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("Start")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(DS.Colors.accent.opacity(0.2))
+                    )
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+
+                Text("or just press Enter")
+                    .font(.system(size: 9))
+                    .foregroundColor(DS.Colors.textTertiary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+        )
+    }
+
+    private func workflowSection(_ session: GuidedWorkflowSession) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("GUIDED WORKFLOW")
+                    .font(DS.Typography.overline)
+                    .foregroundColor(DS.Colors.textTertiary)
+
+                Spacer()
+
+                Text(companionManager.workflowStatusText ?? session.stepProgressText)
+                    .font(DS.Typography.overline)
+                    .foregroundColor(DS.Colors.textTertiary)
+            }
+
+            Text(session.objective)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(DS.Colors.textPrimary)
+
+            if let currentStep = session.currentStep {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Current step")
+                        .font(DS.Typography.caption)
+                        .foregroundColor(DS.Colors.textTertiary)
+
+                    Text(currentStep.goal)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(DS.Colors.textSecondary)
+                }
+            }
+
+            if let lastInstruction = session.lastSpokenInstruction, !lastInstruction.isEmpty {
+                Text(lastInstruction)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+
+            HStack(spacing: 8) {
+                workflowActionButton(title: "Next Step", systemImage: "checkmark.circle") {
+                    companionManager.advanceGuidedWorkflow()
+                }
+
+                workflowActionButton(title: "Repeat", systemImage: "arrow.clockwise") {
+                    companionManager.repeatGuidedWorkflowStep()
+                }
+            }
+
+            HStack(spacing: 8) {
+                workflowActionButton(title: "I'm Stuck", systemImage: "questionmark.circle") {
+                    companionManager.requestGuidedWorkflowHelp()
+                }
+
+                workflowActionButton(title: "Cancel", systemImage: "xmark.circle") {
+                    companionManager.cancelGuidedWorkflow()
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                .fill(DS.Colors.surface1)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.CornerRadius.medium, style: .continuous)
+                .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+        )
+    }
+
+    private func workflowActionButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .medium))
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundColor(DS.Colors.textSecondary)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
             )
         }
         .buttonStyle(.plain)
@@ -843,6 +1062,22 @@ struct CompanionPanelView: View {
         VStack(spacing: 8) {
             HStack {
                 Button(action: {
+                    companionManager.resetSession()
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 11, weight: .medium))
+                        Text("Reset Session")
+                            .font(DS.Typography.bodySmall)
+                    }
+                    .foregroundColor(DS.Colors.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+
+                Spacer()
+
+                Button(action: {
                     NSApp.terminate(nil)
                 }) {
                     HStack(spacing: 6) {
@@ -901,6 +1136,9 @@ struct CompanionPanelView: View {
     }
 
     private var statusText: String {
+        if let workflowStatusText = companionManager.workflowStatusText {
+            return workflowStatusText
+        }
         if !companionManager.hasCompletedOnboarding || !companionManager.allPermissionsGranted {
             return "Setup"
         }

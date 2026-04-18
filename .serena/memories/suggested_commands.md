@@ -1,0 +1,1 @@
+Open in Xcode: open leanring-buddy.xcodeproj. For the Cloudflare Worker: cd worker && npm install, npx wrangler secret put OPENAI_API_KEY, npx wrangler deploy, npx wrangler dev. Avoid terminal xcodebuild because it can invalidate macOS privacy permissions.

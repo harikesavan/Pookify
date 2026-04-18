@@ -93,12 +93,163 @@ final class CompanionManager: ObservableObject {
     }()
 
     @Published var companyName: String?
+    @Published var configurationNoticeText: String?
+    @Published private(set) var workflowSession: GuidedWorkflowSession?
+    @Published private(set) var isAwaitingWorkflowObjective = false
+
+    private var configurationNoticeClearTask: Task<Void, Never>?
+    private var workflowAdvanceTask: Task<Void, Never>?
+    private var workflowAutoVerifyTask: Task<Void, Never>?
+    private var workflowClickMonitor: Any?
 
     func reloadCompanyConfig() {
         guard let config = CompanyConfigManager.loadConfig() else { return }
         companyName = config.company_name
         knowledgeBaseClient.configure(apiKey: config.api_key)
         print("📋 Company config reloaded: \(config.company_name)")
+    }
+
+    func applyCompanyConfig(_ config: CompanyConfig) {
+        let previousApiKey = CompanyConfigManager.loadConfig()?.api_key
+        let shouldResetUsage = previousApiKey != config.api_key
+
+        CompanyConfigManager.saveConfig(config)
+        reloadCompanyConfig()
+
+        if shouldResetUsage {
+            usageTracker?.resetUsage()
+        }
+
+        showConfigurationNotice("Connected to \(config.company_name)")
+    }
+
+    var isGuidedWorkflowActive: Bool {
+        guard let workflowSession else { return false }
+        return workflowSession.phase != .completed
+    }
+
+    var workflowStatusText: String? {
+        guard let workflowSession else { return nil }
+
+        switch workflowSession.phase {
+        case .planning:
+            return "Planning"
+        case .awaitingUserAction:
+            return "Step \(workflowSession.stepProgressText)"
+        case .verifying:
+            return "Checking"
+        case .blocked:
+            return "Needs help"
+        case .completed:
+            return "Done"
+        }
+    }
+
+    func startGuidedWorkflow(withObjective objective: String) {
+        let trimmedObjective = objective.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedObjective.isEmpty else { return }
+
+        isAwaitingWorkflowObjective = false
+
+        workflowAdvanceTask?.cancel()
+        currentResponseTask?.cancel()
+        ttsClient.stopPlayback()
+        clearDetectedElementLocation()
+
+        workflowSession = GuidedWorkflowSession(
+            objective: trimmedObjective,
+            steps: [],
+            stopCondition: "",
+            currentStepIndex: 0,
+            phase: .planning,
+            lastSpokenInstruction: nil,
+            lastVerificationEvidence: []
+        )
+
+        workflowAdvanceTask = Task { [weak self] in
+            await self?.planGuidedWorkflow(for: trimmedObjective)
+        }
+    }
+
+    func advanceGuidedWorkflow() {
+        guard workflowSession != nil else { return }
+
+        workflowAutoVerifyTask?.cancel()
+        workflowAdvanceTask?.cancel()
+        workflowAdvanceTask = Task { [weak self] in
+            await self?.verifyAndAdvanceGuidedWorkflow(extraGuidance: nil)
+        }
+    }
+
+    func repeatGuidedWorkflowStep() {
+        guard let workflowSession else { return }
+
+        workflowAutoVerifyTask?.cancel()
+        workflowAdvanceTask?.cancel()
+        workflowAdvanceTask = Task { [weak self] in
+            await self?.deliverGuidedWorkflowStep(session: workflowSession, extraGuidance: "Repeat the same step clearly and keep the user oriented.")
+        }
+    }
+
+    func requestGuidedWorkflowHelp() {
+        guard workflowSession != nil else { return }
+
+        workflowAutoVerifyTask?.cancel()
+        workflowAdvanceTask?.cancel()
+        workflowAdvanceTask = Task { [weak self] in
+            await self?.verifyAndAdvanceGuidedWorkflow(extraGuidance: "The user says they are stuck. Re-orient them from the current screenshot and give the clearest next move.")
+        }
+    }
+
+    func cancelGuidedWorkflow() {
+        stopWorkflowClickMonitor()
+        workflowAutoVerifyTask?.cancel()
+        workflowAutoVerifyTask = nil
+        workflowAdvanceTask?.cancel()
+        workflowAdvanceTask = nil
+        workflowSession = nil
+        isAwaitingWorkflowObjective = false
+        showConfigurationNotice("Workflow cancelled")
+    }
+
+    func beginGuidedWorkflowPrompt() {
+        isAwaitingWorkflowObjective = true
+        showConfigurationNotice("Describe the task you want help with")
+        showTextPromptWindow()
+    }
+
+    func startGuidedWorkflowFromScreenContext() {
+        workflowAdvanceTask?.cancel()
+        currentResponseTask?.cancel()
+        ttsClient.stopPlayback()
+        clearDetectedElementLocation()
+
+        workflowSession = GuidedWorkflowSession(
+            objective: "",
+            steps: [],
+            stopCondition: "",
+            currentStepIndex: 0,
+            phase: .planning,
+            lastSpokenInstruction: nil,
+            lastVerificationEvidence: []
+        )
+
+        workflowAdvanceTask = Task { [weak self] in
+            await self?.planGuidedWorkflowFromScreen()
+        }
+    }
+
+    private func showConfigurationNotice(_ message: String) {
+        configurationNoticeClearTask?.cancel()
+        configurationNoticeText = message
+
+        configurationNoticeClearTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.configurationNoticeText = nil
+            }
+        }
     }
 
     /// Conversation history so the AI remembers prior exchanges within a session.
@@ -131,7 +282,7 @@ final class CompanionManager: ObservableObject {
     @Published private(set) var isOverlayVisible: Bool = false
 
     /// The AI model used for voice responses. Persisted to UserDefaults.
-    @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedAIModel") ?? "gpt-4o"
+    @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedAIModel") ?? "gpt-5.4"
 
     func setSelectedModel(_ model: String) {
         selectedModel = model
@@ -312,6 +463,30 @@ final class CompanionManager: ObservableObject {
         detectedElementBubbleText = nil
     }
 
+    func resetSession() {
+        currentResponseTask?.cancel()
+        currentResponseTask = nil
+        stopWorkflowClickMonitor()
+        workflowAdvanceTask?.cancel()
+        workflowAdvanceTask = nil
+        workflowAutoVerifyTask?.cancel()
+        workflowAutoVerifyTask = nil
+
+        buddyDictationManager.cancelCurrentDictation()
+        ttsClient.stopPlayback()
+        textPromptWindowManager.hide()
+
+        conversationHistory.removeAll()
+        workflowSession = nil
+        isAwaitingWorkflowObjective = false
+        lastTranscript = nil
+        voiceState = .idle
+
+        clearDetectedElementLocation()
+
+        print("🧹 Session reset — cleared conversation history")
+    }
+
     func stop() {
         globalPushToTalkShortcutMonitor.stop()
         globalTextPromptShortcutMonitor.stop()
@@ -319,6 +494,9 @@ final class CompanionManager: ObservableObject {
         textPromptWindowManager.hide()
         overlayWindowManager.hideOverlay()
         transientHideTask?.cancel()
+        stopWorkflowClickMonitor()
+        workflowAdvanceTask?.cancel()
+        workflowAutoVerifyTask?.cancel()
 
         currentResponseTask?.cancel()
         currentResponseTask = nil
@@ -545,7 +723,7 @@ final class CompanionManager: ObservableObject {
         lastTranscript = trimmedMessage
         print("⌨️ Companion received typed message: \(trimmedMessage)")
         ClickyAnalytics.trackUserMessageSent(transcript: trimmedMessage)
-        sendTranscriptToAIWithScreenshot(transcript: trimmedMessage)
+        handleIncomingUserMessage(trimmedMessage)
     }
 
     private func handleShortcutTransition(_ transition: BuddyPushToTalkShortcut.ShortcutTransition) {
@@ -601,7 +779,7 @@ final class CompanionManager: ObservableObject {
                         self?.lastTranscript = finalTranscript
                         print("🗣️ Companion received transcript: \(finalTranscript)")
                         ClickyAnalytics.trackUserMessageSent(transcript: finalTranscript)
-                        self?.sendTranscriptToAIWithScreenshot(transcript: finalTranscript)
+                        self?.handleIncomingUserMessage(finalTranscript)
                     }
                 )
             }
@@ -644,18 +822,499 @@ final class CompanionManager: ObservableObject {
 
     don't point at things when it would be pointless — like if the user asks a general knowledge question, or the conversation has nothing to do with what's on screen, or you'd just be pointing at something obvious they're already looking at. but if there's a specific UI element, menu, button, or area on screen that's relevant to what you're helping with, point at it.
 
-    when you point, append a coordinate tag at the very end of your response, AFTER your spoken text. the screenshot images are labeled with their pixel dimensions. use those dimensions as the coordinate space. the origin (0,0) is the top-left corner of the image. x increases rightward, y increases downward.
+    when you point, append a coordinate tag at the very end of your response, AFTER your spoken text. do NOT use raw screenshot pixels. use a normalized 0-999 grid instead. the origin (0,0) is the top-left corner of the image. x increases rightward, y increases downward.
 
-    format: [POINT:x,y:label] where x,y are integer pixel coordinates in the screenshot's coordinate space, and label is a short 1-3 word description of the element (like "search bar" or "save button"). if the element is on the cursor's screen you can omit the screen number. if the element is on a DIFFERENT screen, append :screenN where N is the screen number from the image label (e.g. :screen2). this is important — without the screen number, the cursor will point at the wrong place.
+    format: [POINT:x,y:label] where x,y are integer coordinates on a 0-999 grid, and label is a short 1-3 word description of the element (like "search bar" or "save button"). x=0 is the far left edge, x=999 is the far right edge. y=0 is the top edge, y=999 is the bottom edge. always point to the CENTER of the target element, not its edge.
+
+    if you receive multiple screens and the target is not on the primary focus screen, you MUST append :screenN where N is the screen number from the image label (e.g. :screen2). this is important — without the screen number, the cursor will point at the wrong place.
 
     if pointing wouldn't help, append [POINT:none].
 
     examples:
-    - user asks how to color grade in final cut: "you'll want to open the color inspector — it's right up in the top right area of the toolbar. click that and you'll get all the color wheels and curves. [POINT:1100,42:color inspector]"
+    - user asks how to color grade in final cut: "you'll want to open the color inspector — it's right up in the top right area of the toolbar. click that and you'll get all the color wheels and curves. [POINT:812,96:color inspector]"
     - user asks what html is: "html stands for hypertext markup language, it's basically the skeleton of every web page. curious how it connects to the css you're looking at? [POINT:none]"
-    - user asks how to commit in xcode: "see that source control menu up top? click that and hit commit, or you can use command option c as a shortcut. [POINT:285,11:source control]"
-    - element is on screen 2 (not where cursor is): "that's over on your other monitor — see the terminal window? [POINT:400,300:terminal:screen2]"
+    - user asks how to commit in xcode: "see that source control menu up top? click that and hit commit, or you can use command option c as a shortcut. [POINT:244,88:source control]"
+    - element is on screen 2 (not where cursor is): "that's over on your other monitor — see the terminal window? [POINT:503,462:terminal:screen2]"
     """
+
+    private static let guidedWorkflowPlanningSystemPrompt = """
+    you are planning a short guided workflow for a screen-aware desktop assistant.
+
+    return ONLY valid json with this exact shape:
+    {
+      "objective": "string",
+      "steps": [
+        {
+          "id": 1,
+          "goal": "string",
+          "visualAnchor": "string",
+          "successCriteria": "string"
+        }
+      ],
+      "stopCondition": "string"
+    }
+
+    rules:
+    - create three to five steps only
+    - each step must be atomic and visually verifiable from a screenshot
+    - successCriteria must describe what should visibly change on screen
+    - no markdown, no prose, no code fences, only json
+    """
+
+    private static let guidedWorkflowStepSystemPrompt = """
+    you're pookify, guiding the user through a workflow one step at a time.
+
+    respond with one short spoken instruction for the CURRENT step only, then append a point tag if pointing helps.
+
+    rules:
+    - all lowercase, warm, concise
+    - describe only the next immediate action
+    - if pointing helps, use normalized 0-999 coordinates in [POINT:x,y:label]
+    - if pointing would not help, append [POINT:none]
+    - no lists, no step numbers, no markdown
+    - keep the instruction actionable and screen-grounded
+    """
+
+    private static let guidedWorkflowVerificationSystemPrompt = """
+    you are verifying whether a guided workflow step succeeded based on a new screenshot.
+
+    return ONLY valid json with this exact shape:
+    {
+      "status": "pass" | "fail" | "unsure",
+      "evidence": ["string"],
+      "mismatchType": "string or null",
+      "nextAction": "string or null"
+    }
+
+    rules:
+    - use pass only when the expected visible change clearly happened
+    - use fail when the screenshot clearly shows the user is elsewhere or the step is incomplete
+    - use unsure when the screenshot is ambiguous
+    - nextAction should be a short correction or recovery hint when status is fail or unsure
+    - no markdown, no prose, no code fences, only json
+    """
+
+    private func handleIncomingUserMessage(_ message: String) {
+        if isGuidedWorkflowActive {
+            requestGuidedWorkflowHelp()
+            return
+        }
+
+        if isAwaitingWorkflowObjective || messageRequestsGuidedWorkflow(message) {
+            startGuidedWorkflow(withObjective: message)
+        } else {
+            sendTranscriptToAIWithScreenshot(transcript: message)
+        }
+    }
+
+    private func messageRequestsGuidedWorkflow(_ message: String) -> Bool {
+        let normalizedMessage = message.lowercased()
+        let workflowPhrases = [
+            "guide me",
+            "walk me through",
+            "step by step",
+            "help me through",
+            "guide me through",
+            "walk me step by step"
+        ]
+        return workflowPhrases.contains { normalizedMessage.contains($0) }
+    }
+
+    private func makeLabeledImages(from screenCaptures: [CompanionScreenCapture]) -> [(data: Data, label: String)] {
+        screenCaptures.map { capture in
+            let dimensionInfo = " (image dimensions: \(capture.screenshotWidthInPixels)x\(capture.screenshotHeightInPixels) pixels)"
+            return (data: capture.imageData, label: capture.label + dimensionInfo)
+        }
+    }
+
+    private func enrichPromptWithKnowledge(for prompt: String) async -> String {
+        let knowledgeResponse = await knowledgeBaseClient.queryRelevantChunks(for: prompt)
+        let retrievedContext = knowledgeBaseClient.formatChunksForPrompt(knowledgeResponse?.chunks ?? [])
+
+        var enrichedPrompt = ""
+        if let retrievedContext {
+            enrichedPrompt += retrievedContext + "\n\n"
+        }
+        if let customInstructions = knowledgeResponse?.custom_instructions, !customInstructions.isEmpty {
+            enrichedPrompt += "<company_instructions>\n\(customInstructions)\n</company_instructions>\n\n"
+        }
+        enrichedPrompt += prompt
+        return enrichedPrompt
+    }
+
+    private static let guidedWorkflowScreenContextPrompt = """
+    look at the user's screen and determine what they are currently trying to do or what task they might need help with. then create a guided workflow plan to help them complete that task.
+
+    return ONLY valid json with this exact shape:
+    {
+      "objective": "string — what the user appears to be doing",
+      "steps": [
+        {
+          "id": 1,
+          "goal": "string",
+          "visualAnchor": "string",
+          "successCriteria": "string"
+        }
+      ],
+      "stopCondition": "string"
+    }
+
+    rules:
+    - infer the objective from what is visible on screen
+    - create three to five steps only
+    - each step must be atomic and visually verifiable from a screenshot
+    - successCriteria must describe what should visibly change on screen
+    - no markdown, no prose, no code fences, only json
+    """
+
+    private func planGuidedWorkflowFromScreen() async {
+        voiceState = .processing
+
+        do {
+            let screenCaptures = try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()
+            guard !Task.isCancelled else { return }
+
+            let labeledImages = makeLabeledImages(from: screenCaptures)
+            let enrichedPrompt = await enrichPromptWithKnowledge(for: "Look at my screen and help me with what I'm currently doing.")
+
+            let (planText, _) = try await openAIAPI.analyzeImage(
+                images: labeledImages,
+                systemPrompt: Self.guidedWorkflowScreenContextPrompt,
+                userPrompt: enrichedPrompt,
+                maxCompletionTokens: 2048
+            )
+
+            let workflowPlan = try Self.decodeWorkflowJSON(GuidedWorkflowPlan.self, from: planText)
+            guard !workflowPlan.steps.isEmpty else {
+                throw NSError(domain: "GuidedWorkflow", code: -1, userInfo: [NSLocalizedDescriptionKey: "Planning returned no steps"])
+            }
+
+            let session = GuidedWorkflowSession(
+                objective: workflowPlan.objective,
+                steps: workflowPlan.steps,
+                stopCondition: workflowPlan.stopCondition,
+                currentStepIndex: 0,
+                phase: .awaitingUserAction,
+                lastSpokenInstruction: nil,
+                lastVerificationEvidence: []
+            )
+
+            workflowSession = session
+            await deliverGuidedWorkflowStep(session: session, extraGuidance: nil)
+        } catch {
+            workflowSession?.phase = .blocked
+            voiceState = .idle
+            showConfigurationNotice("Workflow planning failed")
+            print("⚠️ Workflow screen-context planning error: \(error)")
+        }
+    }
+
+    private func planGuidedWorkflow(for objective: String) async {
+        voiceState = .processing
+
+        do {
+            let screenCaptures = try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()
+            guard !Task.isCancelled else { return }
+
+            let labeledImages = makeLabeledImages(from: screenCaptures)
+            let planningPrompt = await enrichPromptWithKnowledge(for: "Create a guided workflow plan for this user goal: \(objective)")
+
+            let (planText, _) = try await openAIAPI.analyzeImage(
+                images: labeledImages,
+                systemPrompt: Self.guidedWorkflowPlanningSystemPrompt,
+                userPrompt: planningPrompt,
+                maxCompletionTokens: 2048
+            )
+
+            print("📋 Workflow plan raw: \(planText.prefix(300))...")
+            let workflowPlan = try Self.decodeWorkflowJSON(GuidedWorkflowPlan.self, from: planText)
+            print("📋 Workflow plan parsed: \(workflowPlan.objective) — \(workflowPlan.steps.count) steps")
+            guard !workflowPlan.steps.isEmpty else {
+                throw NSError(domain: "GuidedWorkflow", code: -1, userInfo: [NSLocalizedDescriptionKey: "Planning returned no steps"])
+            }
+
+            let session = GuidedWorkflowSession(
+                objective: workflowPlan.objective,
+                steps: workflowPlan.steps,
+                stopCondition: workflowPlan.stopCondition,
+                currentStepIndex: 0,
+                phase: .awaitingUserAction,
+                lastSpokenInstruction: nil,
+                lastVerificationEvidence: []
+            )
+
+            workflowSession = session
+            await deliverGuidedWorkflowStep(session: session, extraGuidance: nil)
+        } catch {
+            workflowSession?.phase = .blocked
+            voiceState = .idle
+            showConfigurationNotice("Workflow planning failed")
+            print("⚠️ Workflow planning error: \(error)")
+        }
+    }
+
+    private func deliverGuidedWorkflowStep(session: GuidedWorkflowSession, extraGuidance: String?) async {
+        guard let currentStep = session.currentStep else {
+            print("⚠️ Workflow: no current step at index \(session.currentStepIndex)")
+            return
+        }
+
+        print("🚶 Workflow step \(session.stepProgressText): \(currentStep.goal)")
+        voiceState = .processing
+        ttsClient.stopPlayback()
+        clearDetectedElementLocation()
+
+        do {
+            let screenCaptures = try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()
+            guard !Task.isCancelled else { return }
+
+            let labeledImages = makeLabeledImages(from: screenCaptures)
+            var stepPrompt = "workflow objective: \(session.objective)\n"
+            stepPrompt += "current step: \(session.stepProgressText)\n"
+            stepPrompt += "step goal: \(currentStep.goal)\n"
+            stepPrompt += "visual anchor: \(currentStep.visualAnchor)\n"
+            stepPrompt += "success criteria: \(currentStep.successCriteria)\n"
+            if let extraGuidance, !extraGuidance.isEmpty {
+                stepPrompt += "extra guidance: \(extraGuidance)\n"
+            }
+
+            let enrichedStepPrompt = await enrichPromptWithKnowledge(for: stepPrompt)
+
+            let (fullResponseText, _) = try await openAIAPI.analyzeImageStreaming(
+                images: labeledImages,
+                systemPrompt: Self.guidedWorkflowStepSystemPrompt,
+                userPrompt: enrichedStepPrompt,
+                onTextChunk: { _ in }
+            )
+
+            guard !Task.isCancelled else { return }
+
+            let parseResult = Self.parsePointingCoordinates(from: fullResponseText)
+            let spokenText = parseResult.spokenText
+
+            let targetScreenCapture: CompanionScreenCapture? = {
+                if let screenNumber = parseResult.screenNumber,
+                   screenNumber >= 1 && screenNumber <= screenCaptures.count {
+                    return screenCaptures[screenNumber - 1]
+                }
+                return screenCaptures.first(where: { $0.isCursorScreen })
+            }()
+
+            if let pointCoordinate = parseResult.coordinate,
+               let targetScreenCapture {
+                let globalLocation = Self.globalScreenLocation(
+                    fromNormalizedPoint: pointCoordinate,
+                    screenCapture: targetScreenCapture
+                )
+                voiceState = .idle
+                detectedElementScreenLocation = globalLocation
+                detectedElementDisplayFrame = targetScreenCapture.displayFrame
+                detectedElementBubbleText = parseResult.elementLabel
+            }
+
+            workflowSession?.phase = .awaitingUserAction
+            workflowSession?.lastSpokenInstruction = spokenText
+
+            if !spokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                try await ttsClient.speakText(spokenText)
+                voiceState = .responding
+            }
+
+            // Wait for TTS to finish, then auto-verify after a delay
+            scheduleWorkflowAutoVerify()
+        } catch {
+            workflowSession?.phase = .blocked
+            voiceState = .idle
+            showConfigurationNotice("Workflow step failed")
+            print("⚠️ Workflow step error: \(error)")
+        }
+    }
+
+    private func scheduleWorkflowAutoVerify() {
+        workflowAutoVerifyTask?.cancel()
+        stopWorkflowClickMonitor()
+
+        workflowAutoVerifyTask = Task { [weak self] in
+            while self?.ttsClient.isPlaying == true {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                guard !Task.isCancelled else { return }
+            }
+
+            while self?.detectedElementScreenLocation != nil {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                guard !Task.isCancelled else { return }
+            }
+
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                self?.startWorkflowClickMonitor()
+            }
+        }
+    }
+
+    private func startWorkflowClickMonitor() {
+        stopWorkflowClickMonitor()
+
+        workflowClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            guard let self else { return }
+
+            Task { @MainActor in
+                guard self.workflowSession?.phase == .awaitingUserAction else { return }
+                self.stopWorkflowClickMonitor()
+
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+
+                self.workflowAutoVerifyTask?.cancel()
+                self.workflowAdvanceTask?.cancel()
+                self.workflowAdvanceTask = Task { [weak self] in
+                    await self?.verifyAndAdvanceGuidedWorkflow(extraGuidance: nil)
+                }
+            }
+        }
+    }
+
+    private func stopWorkflowClickMonitor() {
+        if let monitor = workflowClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            workflowClickMonitor = nil
+        }
+    }
+
+    private func verifyAndAdvanceGuidedWorkflow(extraGuidance: String?) async {
+        guard var workflowSession, let currentStep = workflowSession.currentStep else { return }
+
+        workflowSession.phase = .verifying
+        self.workflowSession = workflowSession
+        voiceState = .processing
+
+        do {
+            let screenCaptures = try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()
+            guard !Task.isCancelled else { return }
+
+            let labeledImages = makeLabeledImages(from: screenCaptures)
+            var verificationPrompt = "workflow objective: \(workflowSession.objective)\n"
+            verificationPrompt += "current step: \(workflowSession.stepProgressText)\n"
+            verificationPrompt += "step goal: \(currentStep.goal)\n"
+            verificationPrompt += "success criteria: \(currentStep.successCriteria)\n"
+            if let lastInstruction = workflowSession.lastSpokenInstruction {
+                verificationPrompt += "last instruction: \(lastInstruction)\n"
+            }
+            if let extraGuidance, !extraGuidance.isEmpty {
+                verificationPrompt += "extra guidance: \(extraGuidance)\n"
+            }
+
+            let enrichedVerificationPrompt = await enrichPromptWithKnowledge(for: verificationPrompt)
+
+            let (verificationText, _) = try await openAIAPI.analyzeImage(
+                images: labeledImages,
+                systemPrompt: Self.guidedWorkflowVerificationSystemPrompt,
+                userPrompt: enrichedVerificationPrompt
+            )
+
+            let verification = try Self.decodeWorkflowJSON(GuidedWorkflowVerification.self, from: verificationText)
+            workflowSession.lastVerificationEvidence = verification.evidence
+
+            let shouldAdvance = verification.status == "pass" || verification.status == "unsure"
+
+            if shouldAdvance {
+                if workflowSession.currentStepIndex + 1 >= workflowSession.steps.count {
+                    workflowSession.phase = .completed
+                    self.workflowSession = workflowSession
+                    voiceState = .idle
+                    showConfigurationNotice("Workflow completed")
+                    try? await ttsClient.speakText("nice, that workflow is done.")
+                    return
+                }
+
+                workflowSession.currentStepIndex += 1
+                workflowSession.phase = .awaitingUserAction
+                self.workflowSession = workflowSession
+                print("✅ Workflow step verified — advancing to step \(workflowSession.stepProgressText)")
+                await deliverGuidedWorkflowStep(session: workflowSession, extraGuidance: nil)
+            } else {
+                workflowSession.phase = .blocked
+                self.workflowSession = workflowSession
+                print("❌ Workflow step failed verification — waiting for user action")
+                let recoveryMessage = verification.nextAction ?? "that step doesn't look complete yet. try again or press i'm stuck if you need help."
+                try? await ttsClient.speakText(recoveryMessage)
+                voiceState = .idle
+                startWorkflowClickMonitor()
+            }
+        } catch {
+            self.workflowSession?.phase = .blocked
+            voiceState = .idle
+            showConfigurationNotice("Workflow check failed")
+            print("⚠️ Workflow verification error: \(error)")
+        }
+    }
+
+    private static func decodeWorkflowJSON<T: Decodable>(_ type: T.Type, from text: String) throws -> T {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let startIndex = trimmedText.firstIndex(of: "{") else {
+            throw NSError(domain: "GuidedWorkflow", code: -2, userInfo: [NSLocalizedDescriptionKey: "No JSON object found in response"])
+        }
+
+        var jsonText = String(trimmedText[startIndex...])
+
+        if JSONSerialization.isValidJSONObject(try? JSONSerialization.jsonObject(with: Data(jsonText.utf8))) == false {
+            jsonText = repairTruncatedJSON(jsonText)
+        }
+
+        let data = Data(jsonText.utf8)
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            let repairedText = repairTruncatedJSON(jsonText)
+            let repairedData = Data(repairedText.utf8)
+            return try JSONDecoder().decode(T.self, from: repairedData)
+        }
+    }
+
+    private static func repairTruncatedJSON(_ json: String) -> String {
+        var repaired = json
+
+        var inString = false
+        var lastValidIndex = repaired.startIndex
+        var prevChar: Character?
+
+        for index in repaired.indices {
+            let char = repaired[index]
+            if char == "\"" && prevChar != "\\" {
+                inString = !inString
+            }
+            lastValidIndex = index
+            prevChar = char
+        }
+
+        if inString {
+            repaired.append("\"")
+        }
+
+        var openBraces = 0
+        var openBrackets = 0
+        inString = false
+        prevChar = nil
+
+        for char in repaired {
+            if char == "\"" && prevChar != "\\" {
+                inString = !inString
+            }
+            if !inString {
+                if char == "{" { openBraces += 1 }
+                if char == "}" { openBraces -= 1 }
+                if char == "[" { openBrackets += 1 }
+                if char == "]" { openBrackets -= 1 }
+            }
+            prevChar = char
+        }
+
+        for _ in 0..<openBrackets { repaired += "]" }
+        for _ in 0..<openBraces { repaired += "}" }
+
+        print("🔧 Repaired truncated JSON: closed \(openBrackets) brackets and \(openBraces) braces")
+        return repaired
+    }
 
     // MARK: - AI Response Pipeline
 
@@ -742,34 +1401,13 @@ final class CompanionManager: ObservableObject {
 
                 if let pointCoordinate = parseResult.coordinate,
                    let targetScreenCapture {
-                    // The AI's coordinates are in the screenshot's pixel space
-                    // (top-left origin, e.g. 1280x831). Scale to the display's
-                    // point space (e.g. 1512x982), then convert to AppKit global coords.
-                    let screenshotWidth = CGFloat(targetScreenCapture.screenshotWidthInPixels)
-                    let screenshotHeight = CGFloat(targetScreenCapture.screenshotHeightInPixels)
-                    let displayWidth = CGFloat(targetScreenCapture.displayWidthInPoints)
-                    let displayHeight = CGFloat(targetScreenCapture.displayHeightInPoints)
-                    let displayFrame = targetScreenCapture.displayFrame
-
-                    // Clamp to screenshot coordinate space
-                    let clampedX = max(0, min(pointCoordinate.x, screenshotWidth))
-                    let clampedY = max(0, min(pointCoordinate.y, screenshotHeight))
-
-                    // Scale from screenshot pixels to display points
-                    let displayLocalX = clampedX * (displayWidth / screenshotWidth)
-                    let displayLocalY = clampedY * (displayHeight / screenshotHeight)
-
-                    // Convert from top-left origin (screenshot) to bottom-left origin (AppKit)
-                    let appKitY = displayHeight - displayLocalY
-
-                    // Convert display-local coords to global screen coords
-                    let globalLocation = CGPoint(
-                        x: displayLocalX + displayFrame.origin.x,
-                        y: appKitY + displayFrame.origin.y
+                    let globalLocation = Self.globalScreenLocation(
+                        fromNormalizedPoint: pointCoordinate,
+                        screenCapture: targetScreenCapture
                     )
 
                     detectedElementScreenLocation = globalLocation
-                    detectedElementDisplayFrame = displayFrame
+                    detectedElementDisplayFrame = targetScreenCapture.displayFrame
                     ClickyAnalytics.trackElementPointed(elementLabel: parseResult.elementLabel)
                     print("🎯 Element pointing: (\(Int(pointCoordinate.x)), \(Int(pointCoordinate.y))) → \"\(parseResult.elementLabel ?? "element")\"")
                 } else {
@@ -1044,7 +1682,7 @@ final class CompanionManager: ObservableObject {
 
     format: your comment [POINT:x,y:label]
 
-    the screenshot images are labeled with their pixel dimensions. use those dimensions as the coordinate space. origin (0,0) is top-left. x increases rightward, y increases downward.
+    use a normalized 0-999 grid, not raw screenshot pixels. origin (0,0) is top-left. x=999 is the far right edge. y=999 is the bottom edge. point to the center of the thing you picked.
     """
 
     /// Captures a screenshot and asks the AI to find something interesting to
@@ -1082,31 +1720,42 @@ final class CompanionManager: ObservableObject {
                     return
                 }
 
-                let screenshotWidth = CGFloat(cursorScreenCapture.screenshotWidthInPixels)
-                let screenshotHeight = CGFloat(cursorScreenCapture.screenshotHeightInPixels)
-                let displayWidth = CGFloat(cursorScreenCapture.displayWidthInPoints)
-                let displayHeight = CGFloat(cursorScreenCapture.displayHeightInPoints)
-                let displayFrame = cursorScreenCapture.displayFrame
-
-                let clampedX = max(0, min(pointCoordinate.x, screenshotWidth))
-                let clampedY = max(0, min(pointCoordinate.y, screenshotHeight))
-                let displayLocalX = clampedX * (displayWidth / screenshotWidth)
-                let displayLocalY = clampedY * (displayHeight / screenshotHeight)
-                let appKitY = displayHeight - displayLocalY
-                let globalLocation = CGPoint(
-                    x: displayLocalX + displayFrame.origin.x,
-                    y: appKitY + displayFrame.origin.y
+                let globalLocation = Self.globalScreenLocation(
+                    fromNormalizedPoint: pointCoordinate,
+                    screenCapture: cursorScreenCapture
                 )
 
                 // Set custom bubble text so the pointing animation uses the AI's
                 // comment instead of a random phrase
                 detectedElementBubbleText = parseResult.spokenText
                 detectedElementScreenLocation = globalLocation
-                detectedElementDisplayFrame = displayFrame
+                detectedElementDisplayFrame = cursorScreenCapture.displayFrame
                 print("🎯 Onboarding demo: pointing at \"\(parseResult.elementLabel ?? "element")\" — \"\(parseResult.spokenText)\"")
             } catch {
                 print("⚠️ Onboarding demo error: \(error)")
             }
         }
+    }
+
+    private static func globalScreenLocation(
+        fromNormalizedPoint point: CGPoint,
+        screenCapture: CompanionScreenCapture
+    ) -> CGPoint {
+        let displayWidth = CGFloat(screenCapture.displayWidthInPoints)
+        let displayHeight = CGFloat(screenCapture.displayHeightInPoints)
+        let displayFrame = screenCapture.displayFrame
+
+        let clampedNormalizedX = max(0, min(point.x, 999))
+        let clampedNormalizedY = max(0, min(point.y, 999))
+
+        let displayLocalX = clampedNormalizedX / 999.0 * max(displayWidth - 1, 1)
+        let displayLocalY = clampedNormalizedY / 999.0 * max(displayHeight - 1, 1)
+
+        let appKitY = displayHeight - displayLocalY
+
+        return CGPoint(
+            x: displayLocalX + displayFrame.origin.x,
+            y: appKitY + displayFrame.origin.y
+        )
     }
 }

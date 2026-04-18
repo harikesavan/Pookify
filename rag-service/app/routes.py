@@ -136,7 +136,7 @@ async def handle_chat(request: Request):
     body = await request.json()
 
     messages = body.get("messages", [])
-    model = body.get("model", "gpt-4o")
+    model = body.get("model", "gpt-5.4")
     max_completion_tokens = body.get("max_completion_tokens", 1024)
     is_streaming = body.get("stream", False)
     session_id = body.get("session_id") or request.headers.get("x-session-id")

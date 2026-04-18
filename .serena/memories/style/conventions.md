@@ -1,0 +1,1 @@
+Code style: prioritize clarity over brevity, use descriptive names, keep UI in SwiftUI unless AppKit is required, keep UI state on @MainActor, use async/await, and comments should explain why. Do not fix known non-blocking Swift 6/deprecation warnings. Do not run xcodebuild from the terminal.
