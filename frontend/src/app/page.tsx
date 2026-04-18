@@ -7,7 +7,6 @@ export default function Home() {
     <>
       <Hero />
       <Demo />
-      <section className="h-screen w-full" aria-hidden="true" />
       <Footer />
     </>
   );
