@@ -130,8 +130,21 @@ final class CompanionManager: ObservableObject {
     /// Used by the panel to show accurate status text ("Active" vs "Ready").
     @Published private(set) var isOverlayVisible: Bool = false
 
+    private static let defaultAIModel = "gpt-5.4"
+
     /// The AI model used for voice responses. Persisted to UserDefaults.
-    @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedAIModel") ?? "gpt-4o"
+    @Published var selectedModel: String = {
+        let selectedAIModelUserDefaultsKey = "selectedAIModel"
+        let legacyModelIDs = ["gpt-4o", "gpt-4o-mini", "gpt-4.1"]
+
+        if let savedModel = UserDefaults.standard.string(forKey: selectedAIModelUserDefaultsKey),
+           !legacyModelIDs.contains(savedModel) {
+            return savedModel
+        }
+
+        UserDefaults.standard.set(defaultAIModel, forKey: selectedAIModelUserDefaultsKey)
+        return defaultAIModel
+    }()
 
     func setSelectedModel(_ model: String) {
         selectedModel = model

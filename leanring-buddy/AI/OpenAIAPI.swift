@@ -15,7 +15,7 @@ class OpenAIAPI {
     var model: String
     private let session: URLSession
 
-    init(proxyURL: String, model: String = "gpt-4o") {
+    init(proxyURL: String, model: String = "gpt-5.4") {
         self.apiURL = URL(string: proxyURL)!
         self.model = model
 
@@ -100,7 +100,8 @@ class OpenAIAPI {
             contentBlocks.append([
                 "type": "image_url",
                 "image_url": [
-                    "url": "data:image/jpeg;base64,\(image.data.base64EncodedString())"
+                    "url": "data:image/jpeg;base64,\(image.data.base64EncodedString())",
+                    "detail": "high"
                 ]
             ])
         }
@@ -110,12 +111,15 @@ class OpenAIAPI {
         ])
         messages.append(["role": "user", "content": contentBlocks])
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": model,
             "max_completion_tokens": 1024,
             "stream": true,
             "messages": messages
         ]
+        if model.hasPrefix("gpt-5") {
+            body["reasoning_effort"] = "high"
+        }
 
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         request.httpBody = bodyData
@@ -202,7 +206,8 @@ class OpenAIAPI {
             contentBlocks.append([
                 "type": "image_url",
                 "image_url": [
-                    "url": "data:image/jpeg;base64,\(image.data.base64EncodedString())"
+                    "url": "data:image/jpeg;base64,\(image.data.base64EncodedString())",
+                    "detail": "high"
                 ]
             ])
         }
@@ -212,11 +217,14 @@ class OpenAIAPI {
         ])
         messages.append(["role": "user", "content": contentBlocks])
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": model,
             "max_completion_tokens": 256,
             "messages": messages
         ]
+        if model.hasPrefix("gpt-5") {
+            body["reasoning_effort"] = "high"
+        }
 
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         request.httpBody = bodyData
